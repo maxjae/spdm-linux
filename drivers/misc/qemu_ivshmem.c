@@ -41,71 +41,6 @@ static void my_print_hexdump(const char *prefix, const void *buf, size_t len) {
 }
 #endif
 
-// Encrypts @data of size @count and prepends counter as associated data.
-// Appends authentication tag.
-// returns buffer with result (size of return buffer == adlen + count + authsize)
-static void *disagg_mmio_encrypt(struct disagg_crypto *crypto, const u8 *data, size_t count)
-{
-#ifdef CONFIG_DISAGG_DEBUG_MMIO_SEC
-    pr_info("disagg_mmio_encrypt:\n");
-    pr_info("counter: %llu", *crypto->counter);
-    my_print_hexdump("Plaintext: ", data, count);
-#endif
-
-    sg_set_buf(&crypto->sg[0], data, count);
-    aead_request_set_crypt(crypto->req, crypto->sg, crypto->sg_enc, count, crypto->iv);
-    if (crypto_wait_req(crypto_aead_encrypt(crypto->req), &crypto->wait)) {
-	pr_err("disagg_mmio_encrypt: encryption failed\n");
-	return NULL;
-    }
-     
-    ++(*crypto->counter);
-
-#ifdef CONFIG_DISAGG_DEBUG_MMIO_SEC
-    pr_info("cipher-size (only encrypted data): %ld\n", count);
-    my_print_hexdump("ciphertext: ", crypto->buf_enc, count);
-    my_print_hexdump("Auth tag: ", crypto->buf_enc + count, crypto->authsize);
-    pr_info("\n");
-#endif
-
-    return crypto->buf_enc;
-}
-
-// Expects the encrypted data and AD in @crypto->buf_dec. sizeof(data in crypto->buf_dec) == adlen + count + authsize
-// Writes the decrypted data into @buf.
-// Returns 1 for error, 0 for success
-static int disagg_mmio_decrypt(struct disagg_crypto *crypto, u8 *buf, size_t count)
-{
-#ifdef CONFIG_DISAGG_DEBUG_MMIO_SEC
-    pr_info("disagg_mmio_decrypt:\n");
-    pr_info("counter: %llu", *crypto->counter);
-    pr_info("cipher-size (only encrypted data): %ld\n", count);
-    my_print_hexdump("ciphertext: ", crypto->buf_dec, count);
-    my_print_hexdump("Auth Tag: ", crypto->buf_dec + count, crypto->authsize);
-#endif
-
-    int err;
-    sg_set_buf(&crypto->sg[0], buf, count);
-    aead_request_set_crypt(crypto->req, crypto->sg_dec, crypto->sg, count + crypto->authsize, crypto->iv);
-    err = crypto_wait_req(crypto_aead_decrypt(crypto->req), &crypto->wait);
-    if (err) {
-	if (err == -EBADMSG) {
-	    pr_err("disagg_mmio_decrypt: Authetication failed\n");
-	    return 1;
-	}
-	pr_err("disagg_mmio_decrypt: decryption failed\n");
-	return 1;
-    }
-
-#ifdef CONFIG_DISAGG_DEBUG_MMIO_SEC
-    my_print_hexdump("Plaintext: ", buf, count);
-    pr_info("\n");
-#endif
-
-    ++(*crypto->counter);
-    return 0;
-}
-
 static int disagg_init_crypto(struct disagg_crypto *crypto, u8* key, int keylen)
 {
     struct crypto_aead *tfm = NULL;
@@ -304,8 +239,6 @@ static void wait_for_write_doorbell_clear(void)
 
 ssize_t ivshmem_read(void *buf, size_t count, loff_t offset)
 {
-    struct disagg_crypto *crypto = &ivs_dev_global->crypto;
-
     if (!ivs_dev_global || !ivs_dev_global->shmem)
         return -ENODEV;
 
@@ -317,10 +250,7 @@ ssize_t ivshmem_read(void *buf, size_t count, loff_t offset)
 
     wait_for_read_doorbell_set();
 
-    memcpy_fromio(crypto->buf_dec, ivs_dev_global->shmem + TOTAL_DOORBELL_SIZE + offset, count + crypto->authsize);
-
-    if (disagg_mmio_decrypt(crypto, buf, count))
-	return 0;
+    memcpy_fromio(buf, ivs_dev_global->shmem + TOTAL_DOORBELL_SIZE + offset, count);
 
     writeb(0, ivs_dev_global->shmem + READ_DOORBELL_OFFSET);
 
@@ -349,9 +279,6 @@ EXPORT_SYMBOL(ivshmem_read_nonblocking);
 
 ssize_t ivshmem_write(const void *buf, size_t count, loff_t offset)
 {
-    void *enc_buf;
-    struct disagg_crypto *crypto = &ivs_dev_global->crypto;
-
     if (!ivs_dev_global || !ivs_dev_global->shmem)
         return -ENODEV;
 
@@ -361,13 +288,9 @@ ssize_t ivshmem_write(const void *buf, size_t count, loff_t offset)
     if (offset + count > ivs_dev_global->shmem_size - TOTAL_DOORBELL_SIZE)
         count = ivs_dev_global->shmem_size - TOTAL_DOORBELL_SIZE - offset;
 
-    enc_buf = disagg_mmio_encrypt(crypto, buf, count);
-    if (!enc_buf) 
-	return -EPERM;
-
     wait_for_write_doorbell_clear();
 
-    memcpy_toio(ivs_dev_global->shmem + TOTAL_DOORBELL_SIZE + offset, enc_buf, count + crypto->authsize);
+    memcpy_toio(ivs_dev_global->shmem + TOTAL_DOORBELL_SIZE + offset, buf, count);
 
     writeb(1, ivs_dev_global->shmem + WRITE_DOORBELL_OFFSET);
 
