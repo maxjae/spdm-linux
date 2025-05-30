@@ -274,7 +274,9 @@ void disagg_dev_mark_page_not_present(unsigned long start_addr, size_t size)
         if (level == PG_LEVEL_4K) {
             if (!pte_none(*pte)) {
                 pte_clear(&init_mm, addr, pte);
+#ifdef CONFIG_DISAGG_DEBUG_MMIO
                 pr_info("Marked 4K page at 0x%lx as not present\n", addr);
+#endif
                 flush_tlb_one_kernel(addr);
             }
             addr += PAGE_SIZE;
@@ -283,7 +285,9 @@ void disagg_dev_mark_page_not_present(unsigned long start_addr, size_t size)
             pmd_t *pmd = (pmd_t *)pte;
             if (!pmd_none(*pmd)) {
                 pmd_clear(pmd);
+#ifdef CONFIG_DISAGG_DEBUG_MMIO
                 pr_info("Marked 2M page at 0x%lx as not present\n", addr);
+#endif
                 flush_tlb_kernel_range(addr, addr + PMD_SIZE);
             }
             addr += PMD_SIZE;
