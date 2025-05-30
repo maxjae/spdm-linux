@@ -321,26 +321,16 @@ error_free_aead:
 
 static int disagg_dma_encrypt(void *from, void *to, size_t size)
 {
-    struct scatterlist sg_src[1];
-    struct scatterlist sg_dst[1];
-
 #ifdef CONFIG_DISAGG_DEBUG_DMA_SEC
     pr_info("disagg_dma_encrypt:\n");
     pr_info("counter: %llu", *disagg_dma_allocator.crypto.counter);
     my_print_hexdump("Plaintext: ", from, size);
 #endif
 
-    sg_mark_end(sg_src);
-    sg_mark_end(sg_dst);
-    sg_set_buf(&sg_src[0], from, size);
-    sg_set_buf(&sg_dst[0], to, size + disagg_dma_allocator.crypto.authsize);
-    aead_request_set_crypt(disagg_dma_allocator.crypto.req, sg_src, sg_dst, size, disagg_dma_allocator.crypto.iv);
-    if (crypto_wait_req(crypto_aead_encrypt(disagg_dma_allocator.crypto.req), &disagg_dma_allocator.crypto.wait)) {
-	pr_err("disagg_dma_encrypt: encryption failed\n");
-	return 1;
-    }
-     
-    ++(*disagg_dma_allocator.crypto.counter);
+    // We use a simple memcpy, even though one should rather use memcpy_toio().
+    // But because the crypto API presumably also only does a simple copy, we 
+    // do the same here.
+    memcpy(to, from, size);
 
 #ifdef CONFIG_DISAGG_DEBUG_DMA_SEC
     pr_info("cipher-size (only encrypted data): %ld\n", size);
@@ -354,10 +344,6 @@ static int disagg_dma_encrypt(void *from, void *to, size_t size)
 
 static int disagg_dma_decrypt(void *from, void *to, size_t size)
 {
-    struct scatterlist sg_src[1];
-    struct scatterlist sg_dst[1];
-    int err;
-
 #ifdef CONFIG_DISAGG_DEBUG_DMA_SEC
     pr_info("disagg_dma_decrypt:\n");
     pr_info("counter: %llu", *disagg_dma_allocator.crypto.counter);
@@ -366,27 +352,16 @@ static int disagg_dma_decrypt(void *from, void *to, size_t size)
     my_print_hexdump("Auth Tag: ", from + size, disagg_dma_allocator.crypto.authsize);
 #endif
 
-    sg_mark_end(sg_src);
-    sg_mark_end(sg_dst);
-    sg_set_buf(sg_src, from, size + disagg_dma_allocator.crypto.authsize);
-    sg_set_buf(sg_dst, to, size);
-    aead_request_set_crypt(disagg_dma_allocator.crypto.req, sg_src, sg_dst, size + disagg_dma_allocator.crypto.authsize, disagg_dma_allocator.crypto.iv);
-    err = crypto_wait_req(crypto_aead_decrypt(disagg_dma_allocator.crypto.req), &disagg_dma_allocator.crypto.wait);
-    if (err) {
-	if (err == -EBADMSG) {
-	    pr_err("disagg_dma_decrypt: Authetication failed\n");
-	    return 1;
-	}
-	pr_err("disagg_dma_decrypt: decryption failed\n");
-	return 1;
-    }
+    // We use a simple memcpy, even though one should rather use memcpy_fromio().
+    // But because the crypto API presumably also only does a simple copy, we 
+    // do the same here.
+    memcpy(to, from, size);
 
 #ifdef CONFIG_DISAGG_DEBUG_DMA_SEC
     my_print_hexdump("Plaintext: ", to, size);
     pr_info("\n");
 #endif
 
-    ++(*disagg_dma_allocator.crypto.counter);
     return 0;
 }
 
@@ -412,7 +387,7 @@ dma_addr_t disagg_dma_map_page_attrs(struct device *dev, struct page *page, size
     spin_lock(&disagg_dma_allocator.lock);
 
     // just a simple one page allocator
-    if (find_free_region(size + disagg_dma_allocator.crypto.authsize, &proxyDMA) != 0) {
+    if (find_free_region(size, &proxyDMA) != 0) {
 	pr_err("disagg_dma_map_page_attrs: request not fulfillable");
 	goto error;
     }
@@ -470,7 +445,7 @@ void disagg_dma_unmap_page_attrs(struct device *dev, dma_addr_t proxyDMA, size_t
     rb_erase(&entry->node, &disagg_dma_allocator.entry_root);
     kfree(entry);
 
-    add_region_to_free_list(proxyDMA, size + disagg_dma_allocator.crypto.authsize); 
+    add_region_to_free_list(proxyDMA, size); 
 
     spin_unlock(&disagg_dma_allocator.lock);
 
