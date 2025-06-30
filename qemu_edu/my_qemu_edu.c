@@ -61,7 +61,7 @@ static struct file_operations my_fops = {
 };
 
 /* Irq */
-
+/*
 static irqreturn_t my_irq_handler(int irq, void *dev)
 {
     int devi;
@@ -80,6 +80,7 @@ static irqreturn_t my_irq_handler(int irq, void *dev)
     }
     return ret;
 }
+*/
 
 /* Pci specific code */
 
@@ -103,9 +104,11 @@ static int my_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 
     mmio = pci_iomap(dev, PCI_BAR, pci_resource_len(dev, PCI_BAR));
 
-    /* IRQ setup */
     pci_set_master(dev);
 
+    /* IRQ setup */
+
+    /*
     if (pci_alloc_irq_vectors(dev, 1, 1, PCI_IRQ_MSI) < 0) {
 	dev_err(&(dev->dev), "Error: pci_alloc_irq_vectors failed\n");
 	goto error_irq_vectors;
@@ -117,6 +120,7 @@ static int my_pci_probe(struct pci_dev *dev, const struct pci_device_id *id)
 	dev_err(&(dev->dev), "Error: request_irq failed\n");
 	goto error_requ_irq;
     }
+    */
 
 	/* Optional sanity checks. The PCI is ready now, all of this could also be called from fops. */
 	{
