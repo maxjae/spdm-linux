@@ -88,6 +88,7 @@ static int decrypt(u8 *buf, size_t count)
 
 int mmio_read(u64 size, u64 addr, unsigned long *val)
 {
+ktime_t start, end;
 	void *buf = ctx.buf_enc;
 	u64 offset = disagg_ioremap_virt_to_offset(addr);
 
@@ -99,17 +100,29 @@ int mmio_read(u64 size, u64 addr, unsigned long *val)
 	msg->address = offset;
 	msg->length = size;
 
+start = ktime_get();
 	if (encrypt((void *)msg, sizeof(*msg) - sizeof(msg->value)) != 0)
 		return 1;
+end = ktime_get();
+pr_info("time measured pie: Meta encrypt;%llu;%llu end\n", size, (u64) ktime_to_ns(end) - (u64) ktime_to_ns(start));
 
 	*((u8 *)buf) = DISAGG_DEV_OP_READ;
 
+start = ktime_get();
 	ivshmem_mmio_region_write(buf, 1 + ctx.crypto.authsize + (sizeof(*msg) - sizeof(msg->value)));
+end = ktime_get();
+pr_info("time measured pie: Shmem write;%llu;%llu end\n", size, (u64) ktime_to_ns(end) - (u64) ktime_to_ns(start));
 
+start = ktime_get();
 	ivshmem_mmio_region_read(ctx.buf_dec, 1 + sizeof(msg->value) + ctx.crypto.authsize);
+end = ktime_get();
+pr_info("time measured pie: Shmem read;%llu;%llu end\n", size, (u64) ktime_to_ns(end) - (u64) ktime_to_ns(start));
 
+start = ktime_get();
 	if (decrypt((void *)val, sizeof(msg->value)) != 0)
 		return 1;
+end = ktime_get();
+pr_info("time measured pie: Value decrypt;%llu;%llu end\n", size, (u64) ktime_to_ns(end) - (u64) ktime_to_ns(start));
 
 	return 0;
 }
