@@ -9,6 +9,7 @@ static struct mmio_message *msg;
 
 int mmio_read(u64 size, u64 addr, unsigned long *val)
 {
+ktime_t start, end;
 	u64 offset = disagg_ioremap_virt_to_offset(addr);
 
 #ifdef CONFIG_DISAGG_DEBUG_MMIO
@@ -22,9 +23,15 @@ int mmio_read(u64 size, u64 addr, unsigned long *val)
 	// First byte of buf is reserved for unencrypted OP_TYPE
 	msg->op = DISAGG_DEV_OP_READ;
 
+//start = ktime_get();
 	ivshmem_mmio_region_write(msg, (sizeof(*msg) - sizeof(msg->value)));
+//end = ktime_get();
+//pr_info("time measured pie: Shmem write;%llu;%llu end\n", size, (u64) ktime_to_ns(end) - (u64) ktime_to_ns(start));
 
+start = ktime_get();
 	ivshmem_mmio_region_read(val, sizeof(msg->value));
+end = ktime_get();
+pr_info("time measured pie: Shmem read;%llu;%llu end\n", size, (u64) ktime_to_ns(end) - (u64) ktime_to_ns(start));
 
 	return 0;
 }
